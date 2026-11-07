@@ -15,7 +15,7 @@ public sealed class CfhPngForm : Form {
   readonly string engine;
   public CfhPngForm(string path) {
     engine=path; Text="CFH PNG"; Name="CfhPng"; StartPosition=FormStartPosition.CenterScreen; ClientSize=new Size(720,270); MinimumSize=new Size(650,300); Font=new Font("Segoe UI",10);
-    var title=new Label { Text="Make a smaller PNG copy", Font=new Font("Segoe UI",16,FontStyle.Bold), AutoSize=true, Location=new Point(20,15) };
+    var title=new Label { Text="Optimize a PNG copy", Font=new Font("Segoe UI",16,FontStyle.Bold), AutoSize=true, Location=new Point(20,15) };
     var help=new Label { Text="Choose a PNG and where to save its optimized copy.", AutoSize=true, Location=new Point(22,52) };
     var inLabel=new Label { Text="Original PNG", AutoSize=true, Location=new Point(22,86) };
     input.SetBounds(25,110,525,28); input.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right; input.AccessibleName="Original PNG";
