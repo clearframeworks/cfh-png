@@ -1,0 +1,29 @@
+name: Update PNG dependency lock
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 47250e94417c6d6e2d70398c011cf605f5557004
+          persist-credentials: false
+      - name: Update crossbeam epoch only and commit lockfile
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cargo update -p crossbeam-epoch --precise 0.9.20
+          git diff -- Cargo.lock
+          git diff --quiet -- Cargo.lock && { echo 'Lockfile unchanged'; exit 1; }
+          gh api 'repos/clearframeworks/cfh-png/contents/Cargo.lock?ref=cfh-png' --jq .sha > "$RUNNER_TEMP/blob-sha"
+          python - <<'PY'
+          import json,base64,os
+          sha=open(os.path.join(os.environ['RUNNER_TEMP'],'blob-sha')).read().strip()
+          data={'message':'Update crossbeam-epoch to address RUSTSEC-2026-0204','branch':'cfh-png','sha':sha,'content':base64.b64encode(open('Cargo.lock','rb').read()).decode()}
+          with open(os.path.join(os.environ['RUNNER_TEMP'],'body.json'),'w') as f: json.dump(data,f)
+          PY
+          gh api -X PUT repos/clearframeworks/cfh-png/contents/Cargo.lock --input "$RUNNER_TEMP/body.json" --jq .commit.sha
