@@ -1,0 +1,14 @@
+name: Verify public CFH PNG download
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch public asset without credentials
+        run: |
+          set -euo pipefail
+          curl -fLsS 'https://github.com/clearframeworks/cfh-png/releases/download/cfh-png-0.1.0/CFH-PNG-Setup.exe' -o "$RUNNER_TEMP/setup.exe"
+          echo '6ff10f73c630fb73e4f7d94d0f7c03b68dd0b15959e55492e7681997c899002e  '"$RUNNER_TEMP/setup.exe" | sha256sum -c -
+          echo 'PUBLIC DOWNLOAD VERIFIED'
