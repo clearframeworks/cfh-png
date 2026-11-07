@@ -39,16 +39,17 @@ public sealed class CfhPngForm : Form {
     if(String.Equals(src,dst,StringComparison.OrdinalIgnoreCase)) { status.Text="Choose a different name for the copy."; return; }
     if(File.Exists(dst)) { status.Text="That copy already exists. Choose another name."; return; }
     if(!File.Exists(engine)) { status.Text="Optimizer missing. Reinstall CFH PNG."; return; }
+    string temp=Path.Combine(Path.GetDirectoryName(dst),".cfh-"+Guid.NewGuid().ToString("N")+".png");
     run.Enabled=false; status.Text="Optimizing...";
     try {
-      var p=new Process { StartInfo=new ProcessStartInfo { FileName=engine, Arguments="--force --max-raw-size 256MB --out "+Quote(dst)+" -- "+Quote(src), UseShellExecute=false, CreateNoWindow=true, RedirectStandardError=true, RedirectStandardOutput=true } };
+      var p=new Process { StartInfo=new ProcessStartInfo { FileName=engine, Arguments="--force --max-raw-size 256MB --out "+Quote(temp)+" -- "+Quote(src), UseShellExecute=false, CreateNoWindow=true, RedirectStandardError=true, RedirectStandardOutput=true } };
       p.Start();
       var error=p.StandardError.ReadToEndAsync(); var stdout=p.StandardOutput.ReadToEndAsync();
       await Task.Run(()=>p.WaitForExit()); await Task.WhenAll(error,stdout);
-      if(p.ExitCode!=0 || !File.Exists(dst)) { if(File.Exists(dst)) File.Delete(dst); status.Text="Could not optimize this image. Check the file and try again."; }
-      else { long before=new FileInfo(src).Length, after=new FileInfo(dst).Length; status.Text="Saved copy: "+after.ToString("N0")+" bytes (original "+before.ToString("N0")+")."; }
+      if(p.ExitCode!=0 || !File.Exists(temp)) { status.Text="Could not optimize this image. Check the file and try again."; }
+      else { File.Move(temp,dst); long before=new FileInfo(src).Length, after=new FileInfo(dst).Length; status.Text="Saved copy: "+after.ToString("N0")+" bytes (original "+before.ToString("N0")+")."; }
     } catch(Exception) { status.Text="Could not save the copy. Check the folder and try again."; }
-    finally { run.Enabled=true; }
+    finally { try { if(File.Exists(temp)) File.Delete(temp); } catch {} run.Enabled=true; }
   }
 }
 "@
