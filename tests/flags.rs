@@ -1,3 +1,4 @@
+// CFH modification: compare JSON paths using the platform separator.
 use indexmap::indexset;
 use oxipng::{internal_tests::*, *};
 use serde_json::Value;
@@ -677,9 +678,9 @@ fn json_success() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let data: Value = serde_json::from_str(&stdout).expect("Failed to parse JSON");
     let result = &data["results"][0];
-    assert_eq!(result["input"], path);
+    assert_eq!(result["input"], path.replace('/', std::path::MAIN_SEPARATOR_STR));
     assert_eq!(result["status"], "success");
-    assert_eq!(result["output"], path);
+    assert_eq!(result["output"], path.replace('/', std::path::MAIN_SEPARATOR_STR));
     assert_eq!(result["insize"], result["outsize"]);
 }
 
@@ -695,10 +696,10 @@ fn json_dry_run() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let data: Value = serde_json::from_str(&stdout).expect("Failed to parse JSON");
     let result = &data["results"][0];
-    assert_eq!(result["input"], path);
+    assert_eq!(result["input"], path.replace('/', std::path::MAIN_SEPARATOR_STR));
     assert_eq!(result["status"], "success");
     assert_eq!(result["output"], Value::Null);
     let result2 = &data["results"][1];
-    assert_eq!(result2["input"], path2);
+    assert_eq!(result2["input"], path2.replace('/', std::path::MAIN_SEPARATOR_STR));
     assert_eq!(result2["status"], "error");
 }
