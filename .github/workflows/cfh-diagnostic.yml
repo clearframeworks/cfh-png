@@ -15,7 +15,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\installer" | Out-Null
-          gh run download 42398296025 --repo clearframeworks/cfh-png -n cfh-png-installer-unsigned -D "$env:RUNNER_TEMP\installer"
+          gh run download 42398714311 --repo clearframeworks/cfh-png -n cfh-png-installer-unsigned -D "$env:RUNNER_TEMP\installer"
           if($LASTEXITCODE -ne 0){throw 'Artifact download failed'}
           Get-FileHash "$env:RUNNER_TEMP\installer\CFH-PNG-Setup.exe" -Algorithm SHA256 | Format-List
       - name: Install and verify launcher and image copy
