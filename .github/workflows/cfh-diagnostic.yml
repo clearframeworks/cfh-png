@@ -15,7 +15,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\installer" | Out-Null
-          gh run download 42397908871 --repo clearframeworks/cfh-png -n cfh-png-installer-unsigned -D "$env:RUNNER_TEMP\installer"
+          gh run download 42397992810 --repo clearframeworks/cfh-png -n cfh-png-installer-unsigned -D "$env:RUNNER_TEMP\installer"
           if($LASTEXITCODE -ne 0){throw 'Artifact download failed'}
           Get-FileHash "$env:RUNNER_TEMP\installer\CFH-PNG-Setup.exe" -Algorithm SHA256 | Format-List
       - name: Install and verify launcher and image copy
@@ -30,8 +30,19 @@ jobs:
           Add-Type -AssemblyName System.Drawing
           $src="$env:RUNNER_TEMP\input.png"; $dst="$env:RUNNER_TEMP\output.png"
           $bmp=New-Object System.Drawing.Bitmap(48,48)
-          for($x=0;$x -lt 48;$x++){for($y=0;$y -lt 48;$y++){ $bmp.SetPixel($x,$y,[System.Drawing.Color]::FromArgb(255,($x*5),($y*5),(($x+$y)*2))) }}
+          for($x=0;$x -lt 48;$x++){for($y=0;$y -lt 48;$y++){ $bmp.SetPixel($x,$y,[System.Drawing.Color]::FromArgb((($x*5)+1),($x*5),($y*5),(($x+$y)*2))) }}
           $bmp.Save($src,[System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
+          $py=@"
+          import struct, zlib, sys
+          p=sys.argv[1]
+          data=open(p,'rb').read()
+          payload=b'Comment\0CFH metadata fixture'
+          chunk=struct.pack('>I',len(payload))+b'tEXt'+payload+struct.pack('>I',zlib.crc32(b'tEXt'+payload)&0xffffffff)
+          assert data[-12:-8] == b'\x00\x00\x00\x00' and data[-8:-4] == b'IEND'
+          open(p,'wb').write(data[:-12]+chunk+data[-12:])
+          "@
+          $py | python -c "exec(__import__('sys').stdin.read())" $src
+          if($LASTEXITCODE -ne 0){throw 'Metadata fixture failed'}
           $beforeHash=(Get-FileHash $src).Hash
           $before=@(Get-Process powershell -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
           $launcher=Start-Process "$dir\CFH-PNG.cmd" -PassThru
@@ -94,6 +105,16 @@ jobs:
             if((Get-FileHash $src).Hash -ne $beforeHash){throw 'Original was overwritten'}
             $texts=@($children | ForEach-Object { [NativePngTest]::Text($_) })
             if($texts -notcontains 'Choose a different name for the copy.'){throw 'Same-file warning missing'}
+            $dstBytes=[IO.File]::ReadAllBytes($dst)
+            if([Text.Encoding]::ASCII.GetString($dstBytes) -notmatch 'CFH metadata fixture'){throw 'Valid text metadata was not retained'}
+            $invalid="$env:RUNNER_TEMP\invalid.png"; $badOut="$env:RUNNER_TEMP\invalid-copy.png"
+            [IO.File]::WriteAllText($invalid,'not a PNG')
+            [NativePngTest]::Set($edits[0],$invalid); [NativePngTest]::Set($edits[1],$badOut); [NativePngTest]::Click($button)
+            for($i=0;$i -lt 30;$i++){Start-Sleep -Seconds 1; if([NativePngTest]::IsWindowEnabled($button)){break}}
+            if(Test-Path $badOut){throw 'Invalid image produced output'}
+            $texts=@($children | ForEach-Object { [NativePngTest]::Text($_) })
+            if($texts -notcontains 'Could not optimize this image. Check the file and try again.'){throw 'Invalid-image feedback missing'}
+            Write-Output 'ALPHA PIXELS, TEXT METADATA, INVALID INPUT VERIFIED'
             Write-Output 'INSTALLED LAUNCHER, PIXEL PRESERVATION, NO OVERWRITE VERIFIED'
           } finally { if($app -and -not $app.HasExited){Stop-Process -Id $app.Id -Force} }
           $uninstaller=Get-ChildItem "$dir\unins*.exe" | Select-Object -First 1
