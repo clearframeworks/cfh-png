@@ -700,6 +700,6 @@ fn json_dry_run() {
     assert_eq!(result["status"], "success");
     assert_eq!(result["output"], Value::Null);
     let result2 = &data["results"][1];
-    assert_eq!(result2["input"], path2.replace('/', std::path::MAIN_SEPARATOR_STR));
+    assert_eq!(result2["input"], path2);
     assert_eq!(result2["status"], "error");
 }
