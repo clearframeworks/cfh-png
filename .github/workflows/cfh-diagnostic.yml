@@ -1,0 +1,102 @@
+name: CFH PNG installed app diagnostic
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 8
+    steps:
+      - name: Fetch exact built installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\installer" | Out-Null
+          gh run download 42397908871 --repo clearframeworks/cfh-png -n cfh-png-installer-unsigned -D "$env:RUNNER_TEMP\installer"
+          if($LASTEXITCODE -ne 0){throw 'Artifact download failed'}
+          Get-FileHash "$env:RUNNER_TEMP\installer\CFH-PNG-Setup.exe" -Algorithm SHA256 | Format-List
+      - name: Install and verify launcher and image copy
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir="$env:RUNNER_TEMP\installed"
+          $p=Start-Process "$env:RUNNER_TEMP\installer\CFH-PNG-Setup.exe" -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$dir") -Wait -PassThru
+          if($p.ExitCode -ne 0){throw 'Install failed'}
+          foreach($name in @('oxipng.exe','CFH-PNG.ps1','CFH-PNG.cmd','CFH-FORK.md','LICENSE','THIRD-PARTY.txt')) { if(!(Test-Path "$dir\$name")){throw "Missing installed $name"} }
+          Add-Type -AssemblyName System.Drawing
+          $src="$env:RUNNER_TEMP\input.png"; $dst="$env:RUNNER_TEMP\output.png"
+          $bmp=New-Object System.Drawing.Bitmap(48,48)
+          for($x=0;$x -lt 48;$x++){for($y=0;$y -lt 48;$y++){ $bmp.SetPixel($x,$y,[System.Drawing.Color]::FromArgb(255,($x*5),($y*5),(($x+$y)*2))) }}
+          $bmp.Save($src,[System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
+          $beforeHash=(Get-FileHash $src).Hash
+          $before=@(Get-Process powershell -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+          $launcher=Start-Process "$dir\CFH-PNG.cmd" -PassThru
+          $app=$null
+          for($i=0;$i -lt 30;$i++){ $app=Get-Process powershell -ErrorAction SilentlyContinue | Where-Object { $_.Id -notin $before } | Select-Object -First 1; if($app){break}; Start-Sleep -Seconds 1 }
+          if(-not $app){throw 'Launcher did not start'}
+          try {
+            Add-Type @"
+          using System;
+          using System.Collections.Generic;
+          using System.Runtime.InteropServices;
+          using System.Text;
+          public static class NativePngTest {
+            public delegate bool Callback(IntPtr h, IntPtr p);
+            [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string cls,string title);
+            [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr h,Callback c,IntPtr p);
+            [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h,StringBuilder s,int n);
+            [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h,StringBuilder s,int n);
+            [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr h,int msg,IntPtr w,string l);
+            [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr h,int msg,IntPtr w,StringBuilder l);
+            [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h,int msg,IntPtr w,IntPtr l);
+            [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr h);
+            public static List<IntPtr> Children(IntPtr h) { var list=new List<IntPtr>(); EnumChildWindows(h,(x,p)=>{ list.Add(x); return true; },IntPtr.Zero); return list; }
+            public static string Class(IntPtr h) { var b=new StringBuilder(256); GetClassName(h,b,b.Capacity); return b.ToString(); }
+            public static string Text(IntPtr h) { var b=new StringBuilder(1000002); SendMessage(h,13,(IntPtr)b.Capacity,b); return b.ToString(); }
+            public static void Set(IntPtr h,string s) { SendMessage(h,12,IntPtr.Zero,s); }
+            public static void Click(IntPtr h) { SendMessage(h,245,IntPtr.Zero,IntPtr.Zero); }
+          }
+          "@
+            Add-Type -AssemblyName UIAutomationClient
+            $element=$null
+            for($i=0;$i -lt 30;$i++) {
+              if($app.HasExited){throw 'App exited during startup'}
+              $pidCond=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty,$app.Id)
+              $titleCond=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'CFH PNG')
+              $cond=New-Object System.Windows.Automation.AndCondition($pidCond,$titleCond)
+              $element=[System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Children,$cond)
+              if($element){break}; Start-Sleep -Seconds 1
+            }
+            if(-not $element){throw 'PNG form missing'}
+            $window=[IntPtr]$element.Current.NativeWindowHandle
+            if($window -eq [IntPtr]::Zero){throw 'PNG form has no native handle'}
+            $children=[NativePngTest]::Children($window)
+            $edits=@($children | Where-Object { [NativePngTest]::Class($_) -match 'EDIT' })
+            $buttons=@($children | Where-Object { [NativePngTest]::Class($_) -match 'BUTTON' })
+            $button=$buttons | Where-Object { [NativePngTest]::Text($_) -eq 'Optimize' } | Select-Object -First 1
+            if($edits.Count -ne 2 -or -not $button){throw "Unexpected control count: $($edits.Count)"}
+            [NativePngTest]::Set($edits[0],$src); [NativePngTest]::Set($edits[1],$dst); [NativePngTest]::Click($button)
+            for($i=0;$i -lt 60;$i++){ Start-Sleep -Seconds 1; if([NativePngTest]::IsWindowEnabled($button)){break} }
+            if(!(Test-Path $dst)){throw 'Optimized copy missing'}
+            if((Get-FileHash $src).Hash -ne $beforeHash){throw 'Original changed'}
+            $a=[System.Drawing.Bitmap]::FromFile($src); $b=[System.Drawing.Bitmap]::FromFile($dst)
+            try { if($a.Width -ne $b.Width -or $a.Height -ne $b.Height){throw 'Dimensions changed'}; for($x=0;$x -lt 48;$x++){for($y=0;$y -lt 48;$y++){if($a.GetPixel($x,$y).ToArgb() -ne $b.GetPixel($x,$y).ToArgb()){throw 'Pixel mismatch'}}} } finally { $a.Dispose(); $b.Dispose() }
+            $outHash=(Get-FileHash $dst).Hash
+            [NativePngTest]::Click($button)
+            if((Get-FileHash $dst).Hash -ne $outHash){throw 'Existing output overwritten'}
+            $texts=@($children | ForEach-Object { [NativePngTest]::Text($_) })
+            if($texts -notcontains 'That copy already exists. Choose another name.'){throw 'Existing-output message missing'}
+            [NativePngTest]::Set($edits[1],$src); [NativePngTest]::Click($button)
+            if((Get-FileHash $src).Hash -ne $beforeHash){throw 'Original was overwritten'}
+            $texts=@($children | ForEach-Object { [NativePngTest]::Text($_) })
+            if($texts -notcontains 'Choose a different name for the copy.'){throw 'Same-file warning missing'}
+            Write-Output 'INSTALLED LAUNCHER, PIXEL PRESERVATION, NO OVERWRITE VERIFIED'
+          } finally { if($app -and -not $app.HasExited){Stop-Process -Id $app.Id -Force} }
+          $uninstaller=Get-ChildItem "$dir\unins*.exe" | Select-Object -First 1
+          if(-not $uninstaller){throw 'Uninstaller missing'}
+          $p=Start-Process $uninstaller.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          if($p.ExitCode -ne 0){throw 'Uninstall failed'}
