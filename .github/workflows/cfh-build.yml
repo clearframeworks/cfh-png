@@ -1,0 +1,67 @@
+name: CFH PNG Windows verification
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Test and build optimizer
+        shell: pwsh
+        run: |
+          cargo test --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Rust tests failed' }
+          cargo build --release --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Rust build failed' }
+      - name: Generate license inventory
+        shell: pwsh
+        run: |
+          $url='https://github.com/EmbarkStudios/cargo-about/releases/download/0.9.3/cargo-about-0.9.3-x86_64-pc-windows-msvc.tar.gz'
+          Invoke-WebRequest "$url" -OutFile "$env:RUNNER_TEMP\about.tar.gz"
+          Invoke-WebRequest "$url.sha256" -OutFile "$env:RUNNER_TEMP\about.sha256"
+          $expected=((Get-Content "$env:RUNNER_TEMP\about.sha256" -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
+          if ((Get-FileHash "$env:RUNNER_TEMP\about.tar.gz" -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'License tool checksum mismatch' }
+          tar -xzf "$env:RUNNER_TEMP\about.tar.gz" -C "$env:RUNNER_TEMP"
+          $about=Get-ChildItem "$env:RUNNER_TEMP" -Filter cargo-about.exe -Recurse | Select-Object -First 1
+          & $about.FullName about generate about.hbs -o THIRD-PARTY.txt
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path THIRD-PARTY.txt)) { throw 'License inventory failed' }
+      - name: Build unsigned installer
+        shell: pwsh
+        run: |
+          $iss=@"
+          [Setup]
+          AppId=CFHPNG
+          AppName=CFH PNG
+          AppVersion=0.1.0
+          AppPublisher=Coders for Humanity
+          DefaultDirName={localappdata}\Programs\CFH PNG
+          DefaultGroupName=CFH PNG
+          PrivilegesRequired=lowest
+          OutputDir=$env:RUNNER_TEMP\installer
+          OutputBaseFilename=CFH-PNG-Setup
+          Compression=lzma2
+          SolidCompression=yes
+          [Files]
+          Source: "$env:GITHUB_WORKSPACE\target\release\oxipng.exe"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "$env:GITHUB_WORKSPACE\CFH-PNG.ps1"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "$env:GITHUB_WORKSPACE\CFH-PNG.cmd"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "$env:GITHUB_WORKSPACE\CFH-FORK.md"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "$env:GITHUB_WORKSPACE\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "$env:GITHUB_WORKSPACE\THIRD-PARTY.txt"; DestDir: "{app}"; Flags: ignoreversion
+          [Icons]
+          Name: "{group}\CFH PNG"; Filename: "{app}\CFH-PNG.cmd"
+          "@
+          $iss | Set-Content "$env:RUNNER_TEMP\png.iss" -Encoding utf8
+          iscc "$env:RUNNER_TEMP\png.iss"
+          if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }
+      - name: Upload candidate installer
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: cfh-png-installer-unsigned
+          path: ${{ runner.temp }}\installer\CFH-PNG-Setup.exe
+          if-no-files-found: error
