@@ -1,0 +1,30 @@
+name: Prepare CFH PNG draft
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare draft from tested artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/clearframeworks/cfh-png/actions/artifacts/13585285021/zip > "$RUNNER_TEMP/artifact.zip"
+          unzip -q "$RUNNER_TEMP/artifact.zip" -d "$RUNNER_TEMP/package"
+          echo '6ff10f73c630fb73e4f7d94d0f7c03b68dd0b15959e55492e7681997c899002e  '"$RUNNER_TEMP/package/CFH-PNG-Setup.exe" | sha256sum -c -
+          cat > "$RUNNER_TEMP/notes.md" <<'NOTES'
+          CFH PNG is a free Windows app that creates an optimized copy of a PNG image using oxipng 10.2.1 by the oxipng contributors. Choose an original PNG and a new destination, then select Optimize. The app reports both file sizes; the copy is not always smaller. It refuses an existing output and limits input file or decompressed image size to 256 MB.
+
+          The optimizer aims to preserve image appearance. Some metadata invalidated by optimization may be removed; check copies before relying on metadata. Remote testing included one RGBA image and a valid text metadata chunk, not every PNG variation.
+
+          The installer is unsigned and Windows may display an unknown-publisher warning. Windows PowerShell is required; a console remains open while the app runs. The app processes images locally.
+
+          Built from commit `8b48a630ba33cc230cff52cc71454513ef00debc`. Windows checks covered installation, launcher, pixel and alpha comparison, original and existing-output protection, invalid input and uninstall. An OSV dependency scan found no known issues at the time of testing; these checks do not guarantee the software is free of vulnerabilities or malware. The installer includes the upstream MIT license and third-party license inventory.
+
+          Installer SHA-256: `6ff10f73c630fb73e4f7d94d0f7c03b68dd0b15959e55492e7681997c899002e`.
+          NOTES
+          gh release create cfh-png-0.1.0 "$RUNNER_TEMP/package/CFH-PNG-Setup.exe" --repo clearframeworks/cfh-png --target 8b48a630ba33cc230cff52cc71454513ef00debc --draft --title 'CFH PNG 0.1.0' --notes-file "$RUNNER_TEMP/notes.md"
